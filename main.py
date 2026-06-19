@@ -18,9 +18,6 @@ def main(page: ft.Page):
     page.theme_mode = ft.ThemeMode.DARK
     page.bgcolor = "#0e1a0a"
     page.padding = 0
-    page.window.width = 1080
-    page.window.height = 720
-    page.window.resizable = False
     page.fonts = {
         "MedievalSharp": "https://raw.githubusercontent.com/google/fonts/main/ofl/medievalsharp/MedievalSharp.ttf"
     }
@@ -36,7 +33,12 @@ def main(page: ft.Page):
     def navigate_to(view_builder):
         simulator_button.visible = False
         simulator_mailbox.visible = False
-        main_layout.controls[0] = view_builder()
+        view = view_builder()
+        view.top = 0
+        view.left = 0
+        view.right = 0
+        view.bottom = 0
+        main_layout.controls[0] = view
         page.update()
 
     nav["login"]    = lambda:    navigate_to(lambda: build_login_view(page, nav))

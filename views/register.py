@@ -43,53 +43,56 @@ def build_register_view(page, nav):
             page.update()
             return
 
-        USERS_DB[u] = {"password": p, "email": em}
+        USERS_DB[u] = {"password": p, "email": em, "tasks": []}
         show_snack(page, "¡Usuario registrado exitosamente! Ya puedes entrar al pantano.")
         nav["login"]()
 
     right_panel = ft.Container(
         expand=True,
         bgcolor=COLORS["bg_panel"],
-        border_radius=ft.BorderRadius(0, 20, 20, 0),
+        border_radius=0,
         padding=ft.Padding(58, 0, 58, 0),
-        content=ft.Column(
-            [
-                ft.Text("Crear Cuenta", size=30, weight=ft.FontWeight.BOLD, color=COLORS["text_light"]),
-                ft.Text("Completa tus datos para registrarte", size=15, color=COLORS["text_muted"]),
-                ft.Container(height=15),
-                reg_user,
-                ft.Container(height=8),
-                reg_email,
-                ft.Container(height=8),
-                reg_pass,
-                ft.Container(height=8),
-                reg_confirm,
-                ft.Container(height=20),
-                build_action_button("Unirme al reino", ft.Icons.APP_REGISTRATION_ROUNDED, do_register),
-                ft.Container(height=16),
-                ft.Row(
-                    [
-                        ft.Text("¿Ya tienes cuenta?", color=COLORS["text_muted"], size=15),
-                        ft.TextButton(
-                            content=ft.Text("Inicia sesión", color=COLORS["gold"], weight=ft.FontWeight.BOLD, size=15),
-                            on_click=lambda _: nav["login"](),
-                        ),
-                    ],
-                    alignment=ft.MainAxisAlignment.CENTER,
-                ),
-            ],
-            alignment=ft.MainAxisAlignment.CENTER,
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=2,
-        ),
+        alignment=ft.Alignment(0, 0),
+        content=ft.Container(
+            width=408,
+            content=ft.Column(
+                [
+                    ft.Text("Crear Cuenta", size=30, weight=ft.FontWeight.BOLD, color=COLORS["text_light"]),
+                    ft.Text("Completa tus datos para registrarte", size=15, color=COLORS["text_muted"]),
+                    ft.Container(height=15),
+                    reg_user,
+                    ft.Container(height=8),
+                    reg_email,
+                    ft.Container(height=8),
+                    reg_pass,
+                    ft.Container(height=8),
+                    reg_confirm,
+                    ft.Container(height=20),
+                    build_action_button("Unirme al reino", ft.Icons.APP_REGISTRATION_ROUNDED, do_register),
+                    ft.Container(height=16),
+                    ft.Row(
+                        [
+                            ft.Text("¿Ya tienes cuenta?", color=COLORS["text_muted"], size=15),
+                            ft.TextButton(
+                                content=ft.Text("Inicia sesión", color=COLORS["gold"], weight=ft.FontWeight.BOLD, size=15),
+                                on_click=lambda _: nav["login"](),
+                            ),
+                        ],
+                        alignment=ft.MainAxisAlignment.CENTER,
+                    ),
+                ],
+                alignment=ft.MainAxisAlignment.CENTER,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=2,
+            ),
+        )
     )
 
     return ft.Container(
         content=ft.Row([
             build_left_panel("Únete al Reino", "Toda criatura del pantano\nes bienvenida"),
             right_panel,
-        ], spacing=0),
-        width=1032,
-        height=672,
-        border_radius=20,
+        ], spacing=0, expand=True),
+        expand=True,
+        border_radius=0,
     )

@@ -90,37 +90,40 @@ def build_forgot_view(page, nav, simulator_button, simulator_mailbox, text_ref):
     right_panel = ft.Container(
         expand=True,
         bgcolor=COLORS["bg_panel"],
-        border_radius=ft.BorderRadius(0, 20, 20, 0),
+        border_radius=0,
         padding=ft.Padding(58, 0, 58, 0),
-        content=ft.Column(
-            [
-                ft.Text("Recuperación", size=30, weight=ft.FontWeight.BOLD, color=COLORS["text_light"]),
-                ft.Text("Digita tu correo para generar un token", size=15, color=COLORS["text_muted"]),
-                ft.Container(height=25),
-                input_container,
-                verification_container,
-                result_container,
-                ft.Container(height=15),
-                send_btn,
-                verify_btn,
-                ft.Container(height=16),
-                ft.TextButton(
-                    content=ft.Text("Volver al Inicio de Sesión", color=COLORS["gold"], weight=ft.FontWeight.BOLD, size=15),
-                    on_click=lambda _: nav["login"](),
-                ),
-            ],
-            alignment=ft.MainAxisAlignment.CENTER,
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=4,
-        ),
+        alignment=ft.Alignment(0, 0),
+        content=ft.Container(
+            width=408,
+            content=ft.Column(
+                [
+                    ft.Text("Recuperación", size=30, weight=ft.FontWeight.BOLD, color=COLORS["text_light"]),
+                    ft.Text("Digita tu correo para generar un token", size=15, color=COLORS["text_muted"]),
+                    ft.Container(height=25),
+                    input_container,
+                    verification_container,
+                    result_container,
+                    ft.Container(height=15),
+                    send_btn,
+                    verify_btn,
+                    ft.Container(height=16),
+                    ft.TextButton(
+                        content=ft.Text("Volver al Inicio de Sesión", color=COLORS["gold"], weight=ft.FontWeight.BOLD, size=15),
+                        on_click=lambda _: nav["login"](),
+                    ),
+                ],
+                alignment=ft.MainAxisAlignment.CENTER,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=4,
+            ),
+        )
     )
 
     return ft.Container(
         content=ft.Row([
             build_left_panel("Recuperar Cuenta", "Verifica tu identidad\npara regresar al reino"),
             right_panel,
-        ], spacing=0),
-        width=1032,
-        height=624,
-        border_radius=20,
+        ], spacing=0, expand=True),
+        expand=True,
+        border_radius=0,
     )

@@ -38,16 +38,16 @@ def make_field(page, label, icon, password=False, helper="", on_submit_action=No
     )
 
 
-def build_left_panel(title: str, subtitle: str):
+def build_left_panel(title: str, subtitle: str, expand=True):
     """Panel izquierdo decorativo reutilizable en todas las vistas."""
     return ft.Container(
-        width=504,
+        expand=expand,
         gradient=ft.LinearGradient(
             begin=ft.Alignment(-1, -1),
             end=ft.Alignment(1, 1),
             colors=COLORS["gradient"],
         ),
-        border_radius=ft.BorderRadius(20, 0, 0, 20),
+        border_radius=0,
         content=ft.Column(
             [
                 ft.Container(
