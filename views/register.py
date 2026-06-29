@@ -3,15 +3,427 @@
 # ─────────────────────────────────────────
 import flet as ft
 import re
+import threading
+import time
+import base64
+import random
 from constants import USERS_DB, COLORS
 from components import make_field, show_snack, build_left_panel, build_action_button
 
+try:
+    import cv2
+    OPENCV_AVAILABLE = True
+except ImportError:
+    OPENCV_AVAILABLE = False
+
+SIMULATED_FACES = [
+    # Ogre Warrior
+    """<svg width="320" height="240" viewBox="0 0 320 240" xmlns="http://www.w3.org/2000/svg">
+      <rect width="320" height="240" fill="#142410" rx="12" stroke="#3a5c2e" stroke-width="2"/>
+      <ellipse cx="160" cy="110" rx="50" ry="40" fill="#5a9c3e" stroke="#2d4d1a" stroke-width="3"/>
+      <ellipse cx="125" cy="70" rx="15" ry="8" fill="#4a7c2e" stroke="#2d4d1a" stroke-width="2"/>
+      <ellipse cx="195" cy="70" rx="15" ry="8" fill="#4a7c2e" stroke="#2d4d1a" stroke-width="2"/>
+      <circle cx="145" cy="100" r="6" fill="white"/>
+      <circle cx="175" cy="100" r="6" fill="white"/>
+      <circle cx="146" cy="101" r="3" fill="#2d2d2d"/>
+      <circle cx="176" cy="101" r="3" fill="#2d2d2d"/>
+      <path d="M 140 140 Q 160 155 180 140" stroke="#2d4d1a" stroke-width="4" fill="none" stroke-linecap="round"/>
+      <path d="M 120 40 L 130 20 L 140 35 L 160 15 L 180 35 L 190 20 L 200 40 Z" fill="#d4af37" stroke="#a37e1f" stroke-width="2"/>
+      <text x="160" y="210" font-family="MedievalSharp" font-size="14" fill="#d4af37" text-anchor="middle">Guardián del Reino</text>
+    </svg>""",
+    # Swamp Wizard
+    """<svg width="320" height="240" viewBox="0 0 320 240" xmlns="http://www.w3.org/2000/svg">
+      <rect width="320" height="240" fill="#142410" rx="12" stroke="#3a5c2e" stroke-width="2"/>
+      <ellipse cx="160" cy="120" rx="48" ry="42" fill="#4a7c2e" stroke="#2d4d1a" stroke-width="3"/>
+      <polygon points="120,80 160,20 200,80" fill="#2d4d1a" stroke="#1d2d0a" stroke-width="2"/>
+      <circle cx="145" cy="115" r="5" fill="white"/>
+      <circle cx="175" cy="115" r="5" fill="white"/>
+      <path d="M 145 145 Q 160 135 175 145" stroke="#1d2d0a" stroke-width="3" fill="none" stroke-linecap="round"/>
+      <text x="160" y="210" font-family="MedievalSharp" font-size="14" fill="#8aa07a" text-anchor="middle">Mago del Pantano</text>
+    </svg>""",
+    # Noble Knight
+    """<svg width="320" height="240" viewBox="0 0 320 240" xmlns="http://www.w3.org/2000/svg">
+      <rect width="320" height="240" fill="#142410" rx="12" stroke="#3a5c2e" stroke-width="2"/>
+      <ellipse cx="160" cy="110" rx="45" ry="40" fill="#7f8c8d" stroke="#34495e" stroke-width="3"/>
+      <rect x="140" y="90" width="40" height="15" fill="#34495e" rx="3"/>
+      <line x1="145" y1="97" x2="175" y2="97" stroke="white" stroke-width="2"/>
+      <path d="M 145 130 Q 160 145 175 130" stroke="#34495e" stroke-width="3" fill="none" stroke-linecap="round"/>
+      <text x="160" y="210" font-family="MedievalSharp" font-size="14" fill="#cbd5e0" text-anchor="middle">Caballero del Pantano</text>
+    </svg>"""]
+
+
 
 def build_register_view(page, nav):
+    state = {
+        "face_data": None
+    }
+
     reg_user    = make_field(page, "Nombre de usuario",  ft.Icons.PERSON_ROUNDED,      helper="* Campo obligatorio")
     reg_email   = make_field(page, "Correo",             ft.Icons.EMAIL_ROUNDED,        helper="* Campo obligatorio")
     reg_pass    = make_field(page, "Clave Nueva",        ft.Icons.LOCK_ROUNDED,         password=True, helper="* Mínimo 4 caracteres")
     reg_confirm = make_field(page, "Confirmar Clave",    ft.Icons.LOCK_RESET_ROUNDED,   password=True, helper="* Repita su clave")
+
+    class CaptureController:
+        def __init__(self):
+            self.is_running = False
+            self.cap = None
+            self.mode = "real" if OPENCV_AVAILABLE else "simulated"
+            self.captured_image_b64 = None
+
+    cap_ctrl = CaptureController()
+
+    def clear_face_data():
+        state["face_data"] = None
+        face_preview_container.visible = False
+        link_face_btn.visible = True
+        page.update()
+
+    def do_facial_capture(e):
+        cap_ctrl.captured_image_b64 = None
+        cap_ctrl.mode = "real" if OPENCV_AVAILABLE else "simulated"
+
+        mode_btn = ft.IconButton(
+            icon=ft.Icons.VIDEOCAM_ROUNDED if cap_ctrl.mode == "real" else ft.Icons.AUTO_AWESOME_ROUNDED,
+            icon_color=COLORS["gold"],
+            tooltip="Alternar entre cámara real y simulación mística",
+            on_click=None
+        )
+
+        scan_image = ft.Image(
+            src="",
+            width=320,
+            height=240,
+            fit="contain",
+            border_radius=12,
+        )
+
+        status_text = ft.Text(
+            "Iniciando escáner...",
+            color=COLORS["text_muted"],
+            size=14,
+            weight=ft.FontWeight.BOLD,
+            text_align=ft.TextAlign.CENTER
+        )
+
+        capture_btn = ft.ElevatedButton(
+            content=ft.Row([
+                ft.Icon(ft.Icons.CAMERA_ROUNDED, color="#1a2e10", size=18),
+                ft.Text("Tomar Foto", color="#1a2e10", size=14, weight=ft.FontWeight.BOLD),
+            ], alignment=ft.MainAxisAlignment.CENTER),
+            bgcolor=COLORS["gold"],
+            height=44,
+            width=150,
+        )
+
+        confirm_btn = ft.ElevatedButton(
+            content=ft.Row([
+                ft.Icon(ft.Icons.CHECK_CIRCLE_ROUNDED, color="white", size=18),
+                ft.Text("Confirmar Rostro", color="white", size=14, weight=ft.FontWeight.BOLD),
+            ], alignment=ft.MainAxisAlignment.CENTER),
+            bgcolor=COLORS["success"],
+            height=44,
+            width=170,
+            visible=False,
+        )
+
+        retry_btn = ft.OutlinedButton(
+            content=ft.Row([
+                ft.Icon(ft.Icons.REFRESH_ROUNDED, color=COLORS["gold"], size=18),
+                ft.Text("Reintentar", color=COLORS["gold"], size=14, weight=ft.FontWeight.BOLD),
+            ], alignment=ft.MainAxisAlignment.CENTER),
+            height=44,
+            width=130,
+            visible=False,
+        )
+
+        def toggle_mode(e):
+            cap_ctrl.is_running = False
+            if cap_ctrl.cap:
+                cap_ctrl.cap.release()
+                cap_ctrl.cap = None
+
+            if cap_ctrl.mode == "real":
+                cap_ctrl.mode = "simulated"
+                mode_btn.icon = ft.Icons.AUTO_AWESOME_ROUNDED
+                mode_btn.tooltip = "Usar simulación mística"
+                capture_btn.content = ft.Row([
+                    ft.Icon(ft.Icons.AUTO_AWESOME_ROUNDED, color="#1a2e10", size=18),
+                    ft.Text("Iniciar Escaneo", color="#1a2e10", size=14, weight=ft.FontWeight.BOLD),
+                ], alignment=ft.MainAxisAlignment.CENTER)
+            else:
+                if not OPENCV_AVAILABLE:
+                    show_snack(page, "La cámara real requiere OpenCV. Usando modo simulación.", error=True)
+                    return
+                cap_ctrl.mode = "real"
+                mode_btn.icon = ft.Icons.VIDEOCAM_ROUNDED
+                mode_btn.tooltip = "Usar cámara real"
+                capture_btn.content = ft.Row([
+                    ft.Icon(ft.Icons.CAMERA_ROUNDED, color="#1a2e10", size=18),
+                    ft.Text("Tomar Foto", color="#1a2e10", size=14, weight=ft.FontWeight.BOLD),
+                ], alignment=ft.MainAxisAlignment.CENTER)
+
+            page.update()
+            time.sleep(0.2)
+            start_scan()
+
+        mode_btn.on_click = toggle_mode
+
+        def trigger_capture(e):
+            if cap_ctrl.mode == "real" and cap_ctrl.is_running:
+                ret, frame = cap_ctrl.cap.read()
+                if ret and frame is not None:
+                    frame = cv2.flip(frame, 1)
+                    frame_resized = cv2.resize(frame, (320, 240))
+                    _, buffer = cv2.imencode('.jpg', frame_resized)
+                    img_base64 = base64.b64encode(buffer).decode('utf-8')
+                    cap_ctrl.captured_image_b64 = f"data:image/jpeg;base64,{img_base64}"
+                    
+                    cap_ctrl.is_running = False
+                    if cap_ctrl.cap:
+                        cap_ctrl.cap.release()
+                        cap_ctrl.cap = None
+
+                    scan_image.src = cap_ctrl.captured_image_b64
+                    status_text.value = "¡Rostro capturado con éxito!"
+                    status_text.color = COLORS["gold"]
+                    
+                    capture_btn.visible = False
+                    confirm_btn.visible = True
+                    retry_btn.visible = True
+                    page.update()
+
+        capture_btn.on_click = trigger_capture
+
+        def trigger_confirm(e):
+            state["face_data"] = cap_ctrl.captured_image_b64
+            face_preview.src = state["face_data"]
+            face_preview_container.visible = True
+            link_face_btn.visible = False
+            close_scan_dialog()
+            page.update()
+
+        confirm_btn.on_click = trigger_confirm
+
+        def trigger_retry(e):
+            cap_ctrl.captured_image_b64 = None
+            capture_btn.visible = True
+            confirm_btn.visible = False
+            retry_btn.visible = False
+            status_text.value = "Iniciando escáner..."
+            status_text.color = COLORS["text_muted"]
+            page.update()
+            start_scan()
+
+        retry_btn.on_click = trigger_retry
+
+        def start_scan():
+            if cap_ctrl.mode == "real":
+                threading.Thread(
+                    target=start_real_camera_capture,
+                    args=(scan_image, status_text),
+                    daemon=True
+                ).start()
+            else:
+                threading.Thread(
+                    target=start_simulation_capture,
+                    args=(scan_image, status_text),
+                    daemon=True
+                ).start()
+
+        def start_real_camera_capture(image_ctrl, status_ctrl):
+            cap_ctrl.is_running = True
+            cap_ctrl.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+            if not cap_ctrl.cap.isOpened():
+                cap_ctrl.cap = cv2.VideoCapture(0)
+            if not cap_ctrl.cap.isOpened():
+                status_ctrl.value = "Error: No se detectó cámara. Iniciando modo simulación..."
+                status_ctrl.color = COLORS["error"]
+                page.update()
+                time.sleep(1.5)
+                cap_ctrl.mode = "simulated"
+                start_simulation_capture(image_ctrl, status_ctrl)
+                return
+
+            face_cascade = None
+            try:
+                face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+            except Exception:
+                pass
+
+            while cap_ctrl.is_running:
+                ret, frame = cap_ctrl.cap.read()
+                if not ret or frame is None:
+                    time.sleep(0.05)
+                    continue
+
+                frame = cv2.flip(frame, 1)
+                frame_resized = cv2.resize(frame, (320, 240))
+                gray = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2GRAY)
+
+                faces = []
+                if face_cascade is not None and not face_cascade.empty():
+                    faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+
+                for (x, y, w, h) in faces:
+                    cv2.rectangle(frame_resized, (x, y), (x+w, y+h), (212, 175, 55), 2)
+                    d = 10
+                    cv2.line(frame_resized, (x, y), (x+d, y), (212, 175, 55), 3)
+                    cv2.line(frame_resized, (x, y), (x, y+d), (212, 175, 55), 3)
+                    cv2.line(frame_resized, (x+w, y), (x+w-d, y), (212, 175, 55), 3)
+                    cv2.line(frame_resized, (x+w, y), (x+w, y+d), (212, 175, 55), 3)
+                    cv2.line(frame_resized, (x, y+h), (x+d, y+h), (212, 175, 55), 3)
+                    cv2.line(frame_resized, (x, y+h), (x, y+h-d), (212, 175, 55), 3)
+                    cv2.line(frame_resized, (x+w, y+h), (x+w-d, y+h), (212, 175, 55), 3)
+                    cv2.line(frame_resized, (x+w, y+h), (x+w, y+h-d), (212, 175, 55), 3)
+
+                if len(faces) > 0:
+                    status_ctrl.value = "¡Rostro detectado! Presiona 'Tomar Foto'"
+                    status_ctrl.color = COLORS["success"]
+                else:
+                    status_ctrl.value = "Buscando rostro..."
+                    status_ctrl.color = COLORS["text_muted"]
+
+                _, buffer = cv2.imencode('.jpg', frame_resized)
+                img_base64 = base64.b64encode(buffer).decode('utf-8')
+                image_ctrl.src = f"data:image/jpeg;base64,{img_base64}"
+                page.update()
+                time.sleep(0.03)
+
+            if cap_ctrl.cap:
+                cap_ctrl.cap.release()
+
+        def start_simulation_capture(image_ctrl, status_ctrl):
+            cap_ctrl.is_running = True
+            messages = [
+                "Escaneando facciones del pantano...",
+                "Analizando orejas de trompeta...",
+                "Pintando pergamino místico...",
+                "¡Retrato listo!"
+            ]
+            for i, msg in enumerate(messages):
+                if not cap_ctrl.is_running:
+                    break
+                status_ctrl.value = msg
+                status_ctrl.color = COLORS["gold"]
+                progress = (i + 1) / len(messages)
+                pct = int(progress * 100)
+
+                svg_scan = f"""
+                <svg width="320" height="240" viewBox="0 0 320 240" xmlns="http://www.w3.org/2000/svg">
+                  <rect width="320" height="240" fill="#142410" rx="12" stroke="#3a5c2e" stroke-width="2"/>
+                  <circle cx="160" cy="110" r="40" fill="none" stroke="#d4af37" stroke-width="2" stroke-dasharray="5,5"/>
+                  <line x1="10" y1="{40 + i*40}" x2="310" y2="{40 + i*40}" stroke="#d4af37" stroke-width="3" opacity="0.8"/>
+                  <text x="160" y="200" font-family="monospace" font-size="14" fill="#d4af37" text-anchor="middle">ESCANEO: {pct}%</text>
+                </svg>
+                """
+                svg_b64 = base64.b64encode(svg_scan.strip().encode('utf-8')).decode('utf-8')
+                image_ctrl.src = f"data:image/svg+xml;base64,{svg_b64}"
+                page.update()
+                time.sleep(0.6)
+
+            if cap_ctrl.is_running:
+                selected_svg = random.choice(SIMULATED_FACES)
+                cap_ctrl.captured_image_b64 = f"data:image/svg+xml;base64,{base64.b64encode(selected_svg.strip().encode('utf-8')).decode('utf-8')}"
+                image_ctrl.src = cap_ctrl.captured_image_b64
+                status_ctrl.value = "¡Retrato místico listo!"
+                status_ctrl.color = COLORS["success"]
+
+                capture_btn.visible = False
+                confirm_btn.visible = True
+                retry_btn.visible = True
+                cap_ctrl.is_running = False
+                page.update()
+
+        def close_scan_dialog(e=None):
+            cap_ctrl.is_running = False
+            if cap_ctrl.cap:
+                cap_ctrl.cap.release()
+                cap_ctrl.cap = None
+            dialog.open = False
+            page.update()
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Row([
+                ft.Text("Registrar Rostro Místico 📸", color=COLORS["gold"], size=20, weight=ft.FontWeight.BOLD),
+                ft.Container(expand=True),
+                mode_btn
+            ]),
+            content=ft.Container(
+                width=360,
+                height=320,
+                content=ft.Column([
+                    ft.Container(
+                        content=scan_image,
+                        border=ft.Border.all(2, COLORS["border"]),
+                        border_radius=12,
+                        bgcolor=COLORS["bg_field"],
+                        alignment=ft.Alignment(0, 0)
+                    ),
+                    ft.Container(height=10),
+                    ft.Row([status_text], alignment=ft.MainAxisAlignment.CENTER),
+                ], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
+            ),
+            actions=[
+                ft.Row([
+                    retry_btn,
+                    confirm_btn,
+                    capture_btn,
+                    ft.TextButton(
+                        content=ft.Text("Cancelar", color=COLORS["error"], weight=ft.FontWeight.BOLD),
+                        on_click=close_scan_dialog
+                    )
+                ], alignment=ft.MainAxisAlignment.SPACE_EVENLY)
+            ],
+            bgcolor=COLORS["bg_panel"],
+            shape=ft.RoundedRectangleBorder(radius=16),
+        )
+
+        if dialog not in page.overlay:
+            page.overlay.append(dialog)
+        dialog.open = True
+        page.update()
+        start_scan()
+
+    face_preview = ft.Image(
+        src="",
+        width=44,
+        height=44,
+        fit="cover",
+        border_radius=22,
+    )
+    
+    face_preview_container = ft.Container(
+        content=ft.Row([
+            face_preview,
+            ft.Text("¡Rostro Vinculado!", color=COLORS["success"], size=14, weight=ft.FontWeight.BOLD),
+            ft.IconButton(
+                icon=ft.Icons.DELETE_FOREVER_ROUNDED,
+                icon_color=COLORS["error"],
+                tooltip="Eliminar rostro",
+                on_click=lambda _: clear_face_data()
+            )
+        ], alignment=ft.MainAxisAlignment.CENTER),
+        visible=False,
+    )
+
+    link_face_btn = ft.OutlinedButton(
+        content=ft.Row(
+            [
+                ft.Icon(ft.Icons.ADD_A_PHOTO_ROUNDED, color=COLORS["gold"], size=18),
+                ft.Text("Vincular Rostro Místico", color=COLORS["gold"], size=14, weight=ft.FontWeight.BOLD),
+            ],
+            alignment=ft.MainAxisAlignment.CENTER,
+            spacing=8,
+        ),
+        height=48,
+        width=408,
+        on_click=do_facial_capture,
+        style=ft.ButtonStyle(
+            shape=ft.RoundedRectangleBorder(radius=12),
+            side=ft.BorderSide(1.5, COLORS["gold"]),
+        ),
+    )
 
     def do_register(e):
         u  = reg_user.value.strip()
@@ -43,7 +455,7 @@ def build_register_view(page, nav):
             page.update()
             return
 
-        USERS_DB[u] = {"password": p, "email": em, "tasks": []}
+        USERS_DB[u] = {"password": p, "email": em, "tasks": [], "face_data": state["face_data"]}
         show_snack(page, "¡Usuario registrado exitosamente! Ya puedes entrar al pantano.")
         nav["login"]()
 
@@ -67,7 +479,10 @@ def build_register_view(page, nav):
                     reg_pass,
                     ft.Container(height=8),
                     reg_confirm,
-                    ft.Container(height=20),
+                    ft.Container(height=10),
+                    link_face_btn,
+                    face_preview_container,
+                    ft.Container(height=15),
                     build_action_button("Unirme al reino", ft.Icons.APP_REGISTRATION_ROUNDED, do_register),
                     ft.Container(height=16),
                     ft.Row(

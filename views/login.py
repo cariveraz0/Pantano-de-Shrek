@@ -8,12 +8,64 @@ import base64
 from constants import USERS_DB, COLORS
 from components import make_field, show_snack, build_left_panel, build_action_button
 
-# Intentar importar cv2 para detección facial real
+# Intentar importar cv2 y numpy para detección/reconocimiento facial real
 try:
     import cv2
+    import numpy as np
     OPENCV_AVAILABLE = True
+    LBPH_AVAILABLE = hasattr(cv2, 'face') and hasattr(cv2.face, 'LBPHFaceRecognizer_create')
 except ImportError:
     OPENCV_AVAILABLE = False
+    LBPH_AVAILABLE = False
+
+
+def build_face_recognizer():
+    """
+    Entrena un reconocedor LBPH con las fotos de rostro guardadas en USERS_DB.
+    Solo procesa imágenes JPEG reales (no SVG simuladas).
+    Retorna (recognizer, label_map) o (None, None) si no es posible.
+    """
+    if not LBPH_AVAILABLE:
+        return None, None
+
+    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    recognizer = cv2.face.LBPHFaceRecognizer_create()
+
+    faces_list = []
+    labels_list = []
+    label_map = {}  # int_label -> username
+
+    for idx, (username, data) in enumerate(USERS_DB.items()):
+        if not isinstance(data, dict):
+            continue
+        face_data_str = data.get("face_data", "")
+        # Solo imágenes JPEG reales; las SVG son simuladas y no sirven para reconocimiento
+        if not face_data_str or not face_data_str.startswith("data:image/jpeg;base64,"):
+            continue
+        try:
+            img_b64 = face_data_str.split(",", 1)[1]
+            img_bytes = base64.b64decode(img_b64)
+            img_array = np.frombuffer(img_bytes, dtype=np.uint8)
+            img_gray = cv2.imdecode(img_array, cv2.IMREAD_GRAYSCALE)
+            if img_gray is None:
+                continue
+            detected = face_cascade.detectMultiScale(img_gray, 1.1, 4)
+            if len(detected) > 0:
+                x, y, w, h = detected[0]
+                face_roi = cv2.resize(img_gray[y:y+h, x:x+w], (100, 100))
+            else:
+                face_roi = cv2.resize(img_gray, (100, 100))
+            faces_list.append(face_roi)
+            labels_list.append(idx)
+            label_map[idx] = username
+        except Exception:
+            continue
+
+    if not faces_list:
+        return None, None
+
+    recognizer.train(faces_list, np.array(labels_list, dtype=np.int32))
+    return recognizer, label_map
 
 
 def build_login_view(page, nav):
@@ -88,20 +140,17 @@ def build_login_view(page, nav):
 
     scan_ctrl = ScanController()
 
-    def start_real_camera(image_ctrl, status_ctrl, selected_user, close_callback):
+    def start_real_camera(image_ctrl, status_ctrl, selected_user, close_callback, recognizer=None, label_map=None):
         scan_ctrl.is_running = True
-        # Usar DirectShow en Windows para evitar demoras de inicio
         scan_ctrl.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
         if not scan_ctrl.cap.isOpened():
-            # Intentar abrir con el driver por defecto si falla
             scan_ctrl.cap = cv2.VideoCapture(0)
-            
+
         if not scan_ctrl.cap.isOpened():
             status_ctrl.value = "Error: No se detectó cámara. Iniciando modo simulación..."
             status_ctrl.color = COLORS["error"]
             page.update()
             time.sleep(1.5)
-            # Cambiar a simulación
             scan_ctrl.mode = "simulated"
             start_simulation(image_ctrl, status_ctrl, selected_user, close_callback)
             return
@@ -112,8 +161,9 @@ def build_login_view(page, nav):
         except Exception:
             pass
 
-        consecutive_faces = 0
-        
+        consecutive_matches = 0    # frames donde el rostro coincide con el usuario
+        consecutive_noface = 0     # frames sin rostro (para resetear aviso)
+
         while scan_ctrl.is_running:
             ret, frame = scan_ctrl.cap.read()
             if not ret or frame is None:
@@ -121,45 +171,76 @@ def build_login_view(page, nav):
                 continue
 
             frame = cv2.flip(frame, 1)
-            
-            # Redimensionar para optimizar ancho de banda de actualización
             frame_resized = cv2.resize(frame, (320, 240))
             gray = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2GRAY)
-            
+
             faces = []
             if face_cascade is not None and not face_cascade.empty():
                 faces = face_cascade.detectMultiScale(gray, 1.1, 4)
 
-            # Dibujar recuadro dorado sci-fi en las caras detectadas
-            for (x, y, w, h) in faces:
-                cv2.rectangle(frame_resized, (x, y), (x+w, y+h), (55, 175, 212), 2)
-                d = 10
-                cv2.line(frame_resized, (x, y), (x+d, y), (55, 175, 212), 3)
-                cv2.line(frame_resized, (x, y), (x, y+d), (55, 175, 212), 3)
-                cv2.line(frame_resized, (x+w, y), (x+w-d, y), (55, 175, 212), 3)
-                cv2.line(frame_resized, (x+w, y), (x+w, y+d), (55, 175, 212), 3)
-                cv2.line(frame_resized, (x, y+h), (x+d, y+h), (55, 175, 212), 3)
-                cv2.line(frame_resized, (x, y+h), (x, y+h-d), (55, 175, 212), 3)
-                cv2.line(frame_resized, (x+w, y+h), (x+w-d, y+h), (55, 175, 212), 3)
-                cv2.line(frame_resized, (x+w, y+h), (x+w, y+h-d), (55, 175, 212), 3)
+            # Color del marco según estado
+            frame_color = (55, 175, 212)   # azul: buscando
 
             if len(faces) > 0:
-                consecutive_faces += 1
-                status_ctrl.value = f"¡Rostro detectado! Verificando linaje ({consecutive_faces * 10}%)"
-                status_ctrl.color = COLORS["gold"]
+                consecutive_noface = 0
+                x, y, w, h = faces[0]
+
+                if recognizer is not None and label_map is not None:
+                    # ── Reconocimiento real con LBPH ──
+                    try:
+                        face_roi = cv2.resize(gray[y:y+h, x:x+w], (100, 100))
+                        pred_label, confidence = recognizer.predict(face_roi)
+                        pred_user = label_map.get(pred_label, "")
+                        # LBPH: menor confidence = mejor coincidencia. < 80 es una buena coincidencia
+                        if pred_user == selected_user and confidence < 80:
+                            consecutive_matches += 1
+                            frame_color = (55, 212, 125)   # verde: coincide
+                            pct = min(consecutive_matches * 10, 100)
+                            status_ctrl.value = f"¡Rostro reconocido! Verificando identidad ({pct}%)"
+                            status_ctrl.color = COLORS["success"]
+                        else:
+                            consecutive_matches = max(0, consecutive_matches - 1)
+                            frame_color = (55, 55, 212)    # rojo-azul: no coincide
+                            status_ctrl.value = f"⛔ Rostro no reconocido — Acceso denegado"
+                            status_ctrl.color = COLORS["error"]
+                    except Exception:
+                        # Si LBPH falla por alguna razón, no conceder acceso
+                        consecutive_matches = 0
+                        status_ctrl.value = "Error en reconocimiento. Intenta de nuevo."
+                        status_ctrl.color = COLORS["error"]
+                else:
+                    # Sin reconocedor: simplemente detecta presencia (fallback)
+                    consecutive_matches += 1
+                    frame_color = (55, 212, 125)
+                    status_ctrl.value = f"¡Rostro detectado! Verificando ({consecutive_matches * 10}%)"
+                    status_ctrl.color = COLORS["gold"]
+
+                # Dibujar esquinas del marco en el color correspondiente
+                d = 10
+                for (fx, fy, fw, fh) in faces:
+                    cv2.rectangle(frame_resized, (fx, fy), (fx+fw, fy+fh), frame_color, 2)
+                    cv2.line(frame_resized, (fx, fy), (fx+d, fy), frame_color, 3)
+                    cv2.line(frame_resized, (fx, fy), (fx, fy+d), frame_color, 3)
+                    cv2.line(frame_resized, (fx+fw, fy), (fx+fw-d, fy), frame_color, 3)
+                    cv2.line(frame_resized, (fx+fw, fy), (fx+fw, fy+d), frame_color, 3)
+                    cv2.line(frame_resized, (fx, fy+fh), (fx+d, fy+fh), frame_color, 3)
+                    cv2.line(frame_resized, (fx, fy+fh), (fx, fy+fh-d), frame_color, 3)
+                    cv2.line(frame_resized, (fx+fw, fy+fh), (fx+fw-d, fy+fh), frame_color, 3)
+                    cv2.line(frame_resized, (fx+fw, fy+fh), (fx+fw, fy+fh-d), frame_color, 3)
             else:
-                consecutive_faces = max(0, consecutive_faces - 1)
-                status_ctrl.value = "Buscando rostro de ogro..."
+                consecutive_noface += 1
+                if consecutive_noface > 5:
+                    consecutive_matches = max(0, consecutive_matches - 1)
+                status_ctrl.value = "Buscando rostro..."
                 status_ctrl.color = COLORS["text_muted"]
 
-            # Codificar a base64 y actualizar imagen en Flet
             _, buffer = cv2.imencode('.jpg', frame_resized)
             img_base64 = base64.b64encode(buffer).decode('utf-8')
             image_ctrl.src = f"data:image/jpeg;base64,{img_base64}"
             page.update()
 
-            if consecutive_faces >= 10:
-                status_ctrl.value = f"¡Acceso Concedido! Bienvenido, {selected_user}."
+            if consecutive_matches >= 10:
+                status_ctrl.value = f"¡Acceso Concedido! Bienvenido, {selected_user}. 🌱"
                 status_ctrl.color = COLORS["success"]
                 page.update()
                 time.sleep(1.2)
@@ -184,7 +265,7 @@ def build_login_view(page, nav):
             "Analizando orejas de trompeta...",
             "Midiendo nivel de cebolla...",
             "Autenticando ADN del pantano...",
-            "¡Acceso Concedido! Bienvenido, noble criatura."
+            f"¡Acceso Concedido! Bienvenido, {selected_user}."
         ]
         
         for i, msg in enumerate(messages):
@@ -243,12 +324,16 @@ def build_login_view(page, nav):
             show_snack(page, "No hay habitantes registrados en el pantano. Regístrate primero.", error=True)
             return
 
-        # Recargar opciones por si hay usuarios nuevos
-        user_dropdown.options = [ft.dropdown.Option(u) for u in USERS_DB.keys()]
-        user_dropdown.value = list(USERS_DB.keys())[0]
+        # Recargar opciones: solo usuarios con rostro registrado
+        users_with_face = [u for u, d in USERS_DB.items() if isinstance(d, dict) and d.get("face_data")]
+        if not users_with_face:
+            show_snack(page, "¡Ningún habitante tiene rostro registrado! Regístrate y vincula tu rostro primero.", error=True)
+            return
+
+        user_dropdown.options = [ft.dropdown.Option(u) for u in users_with_face]
+        user_dropdown.value = users_with_face[0]
         
         # Modo por defecto según disponibilidad de OpenCV
-        # (Se puede alternar dinámicamente si el usuario lo desea)
         scan_ctrl.mode = "real" if (OPENCV_AVAILABLE or globals().get('OPENCV_AVAILABLE', False)) else "simulated"
         
         mode_btn = ft.IconButton(
@@ -259,6 +344,14 @@ def build_login_view(page, nav):
         )
         
         scan_image = ft.Image(
+            src="",
+            width=320,
+            height=240,
+            fit="contain",
+            border_radius=12,
+        )
+
+        registered_face_image = ft.Image(
             src="",
             width=320,
             height=240,
@@ -285,7 +378,6 @@ def build_login_view(page, nav):
                 mode_btn.icon = ft.Icons.AUTO_AWESOME_ROUNDED
                 mode_btn.tooltip = "Usar simulación mística"
             else:
-                # Comprobar dinámicamente si cv2 se importó correctamente a posteriori
                 is_cv2_avail = False
                 try:
                     import cv2
@@ -313,19 +405,56 @@ def build_login_view(page, nav):
                 status_text.color = COLORS["error"]
                 page.update()
                 return
-                
+
+            user_data = USERS_DB.get(selected)
+            if not isinstance(user_data, dict) or not user_data.get("face_data"):
+                status_text.value = "Este habitante no tiene rostro registrado."
+                status_text.color = COLORS["error"]
+                registered_face_image.src = ""
+                # Clear active video feed/scan view
+                scan_image.src = ""
+                page.update()
+                return
+
+            status_text.value = "Iniciando escáner..."
+            status_text.color = COLORS["text_muted"]
+            page.update()
+
+            # Verificar si el usuario registró con foto real o simulación
+            user_data = USERS_DB.get(selected)
+            face_str = user_data.get("face_data", "") if isinstance(user_data, dict) else ""
+            is_real_face = face_str.startswith("data:image/jpeg;base64,")
+
             if scan_ctrl.mode == "real":
+                # Construir reconocedor LBPH solo si el usuario tiene foto real
+                rec, lmap = (build_face_recognizer() if is_real_face else (None, None))
+                if not is_real_face:
+                    status_text.value = "Rostro registrado en modo simulación. Usa clave normal o re-regístrate con cámara real."
+                    status_text.color = COLORS["error"]
+                    page.update()
+                    return
                 threading.Thread(
-                    target=start_real_camera, 
-                    args=(scan_image, status_text, selected, close_scan_dialog), 
+                    target=start_real_camera,
+                    args=(scan_image, status_text, selected, close_scan_dialog),
+                    kwargs={"recognizer": rec, "label_map": lmap},
                     daemon=True
                 ).start()
             else:
                 threading.Thread(
-                    target=start_simulation, 
-                    args=(scan_image, status_text, selected, close_scan_dialog), 
+                    target=start_simulation,
+                    args=(scan_image, status_text, selected, close_scan_dialog),
                     daemon=True
                 ).start()
+
+        def on_user_change(e):
+            scan_ctrl.is_running = False
+            if scan_ctrl.cap:
+                scan_ctrl.cap.release()
+                scan_ctrl.cap = None
+            time.sleep(0.2)
+            start_scan()
+
+        user_dropdown.on_change = on_user_change
 
         def close_scan_dialog(e=None):
             scan_ctrl.is_running = False
@@ -343,8 +472,8 @@ def build_login_view(page, nav):
                 mode_btn
             ]),
             content=ft.Container(
-                width=360,
-                height=390,
+                width=400,
+                height=380,
                 content=ft.Column([
                     user_dropdown,
                     ft.Container(height=10),
@@ -353,6 +482,8 @@ def build_login_view(page, nav):
                         border=ft.Border.all(2, COLORS["border"]),
                         border_radius=12,
                         bgcolor=COLORS["bg_field"],
+                        width=360,
+                        height=270,
                         alignment=ft.Alignment(0, 0)
                     ),
                     ft.Container(height=10),
@@ -375,7 +506,9 @@ def build_login_view(page, nav):
         page.update()
         start_scan()
 
-    user_options = [ft.dropdown.Option(u) for u in USERS_DB.keys()]
+    # Dropdown: solo usuarios con rostro vinculado al inicio
+    users_with_face_init = [u for u, d in USERS_DB.items() if isinstance(d, dict) and d.get("face_data")]
+    user_options = [ft.dropdown.Option(u) for u in users_with_face_init]
     user_dropdown = ft.Dropdown(
         label="Seleccionar habitante del pantano",
         options=user_options,

@@ -2,14 +2,6 @@
 #  constants.py — Datos globales del Reino
 # ─────────────────────────────────────────
 
-# Base de datos temporal en memoria
-USERS_DB = {
-    "Shrek": {"password": "cebolla", "email": "shrek@pantano.com", "tasks": []}
-}
-
-# Estado global del código de verificación simulado
-CURRENT_SIMULATED_CODE = None
-
 # Ícono original de ogro con corona dorada
 OGRE_SVG = """
 <svg width="130" height="130" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
@@ -31,6 +23,13 @@ OGRE_SVG = """
   <circle cx="60" cy="10" r="4" fill="#f5d76e"/>
 </svg>
 """
+
+# Base de datos temporal en memoria — empieza vacía; solo se puebla con registros reales
+USERS_DB = {}
+
+# Estado global del código de verificación simulado
+CURRENT_SIMULATED_CODE = None
+
 
 # Paleta de colores del reino
 COLORS = {
