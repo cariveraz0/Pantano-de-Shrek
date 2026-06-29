@@ -3,7 +3,9 @@
 # ─────────────────────────────────────────
 
 # Base de datos temporal en memoria
-USERS_DB = {}
+USERS_DB = {
+    "Shrek": {"password": "cebolla", "email": "shrek@pantano.com", "tasks": []}
+}
 
 # Estado global del código de verificación simulado
 CURRENT_SIMULATED_CODE = None
