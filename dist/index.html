@@ -404,6 +404,15 @@
         <p class="scan-status" id="scan-status">Iniciando escáner...</p>
       </div>
       <div class="modal-actions" id="modal-actions">
+        <button class="btn-capture hidden" id="btn-take-photo">
+          <span class="material-icons-round">camera</span> Tomar Foto
+        </button>
+        <button class="btn-confirm-face hidden" id="btn-confirm-photo">
+          <span class="material-icons-round">check_circle</span> Confirmar Rostro
+        </button>
+        <button class="btn-retry hidden" id="btn-retry-photo">
+          <span class="material-icons-round">refresh</span> Reintentar
+        </button>
         <button class="btn-outline danger" id="btn-modal-cancel">Cancelar</button>
       </div>
     </div>
@@ -434,7 +443,7 @@
   </button>
 
   <!-- face-api.js from CDN -->
-  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

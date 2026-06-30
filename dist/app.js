@@ -531,34 +531,14 @@
 
     if (mode === 'capture') {
       modalTitle.textContent = 'Registrar Rostro 📸';
-      modalActions.innerHTML = `
-        <button class="btn-capture" id="btn-take-photo">
-          <span class="material-icons-round">camera</span> Tomar Foto
-        </button>
-        <button class="btn-confirm-face hidden" id="btn-confirm-photo">
-          <span class="material-icons-round">check_circle</span> Confirmar Rostro
-        </button>
-        <button class="btn-retry hidden" id="btn-retry-photo">
-          <span class="material-icons-round">refresh</span> Reintentar
-        </button>
-        <button class="btn-outline danger" id="btn-modal-cancel-inner" style="width:auto;height:auto;padding:10px 20px;font-size:14px;">Cancelar</button>
-      `;
-
-      // Bind capture actions
-      setTimeout(() => {
-        $('#btn-take-photo').addEventListener('click', takePhoto);
-        $('#btn-confirm-photo').addEventListener('click', confirmPhoto);
-        $('#btn-retry-photo').addEventListener('click', retryPhoto);
-        $('#btn-modal-cancel-inner').addEventListener('click', closeCameraModal);
-      }, 0);
+      $('#btn-take-photo').classList.remove('hidden');
+      $('#btn-confirm-photo').classList.add('hidden');
+      $('#btn-retry-photo').classList.add('hidden');
     } else {
       modalTitle.textContent = 'Escáner Facial del Reino 👁️';
-      modalActions.innerHTML = `
-        <button class="btn-outline danger" id="btn-modal-cancel-inner" style="width:auto;height:auto;padding:10px 20px;font-size:14px;">Cancelar</button>
-      `;
-      setTimeout(() => {
-        $('#btn-modal-cancel-inner').addEventListener('click', closeCameraModal);
-      }, 0);
+      $('#btn-take-photo').classList.add('hidden');
+      $('#btn-confirm-photo').classList.add('hidden');
+      $('#btn-retry-photo').classList.add('hidden');
     }
 
     modalOverlay.classList.remove('hidden');
@@ -599,6 +579,9 @@
 
   // Cancel button (static one in HTML)
   $('#btn-modal-cancel').addEventListener('click', closeCameraModal);
+  $('#btn-take-photo').addEventListener('click', takePhoto);
+  $('#btn-confirm-photo').addEventListener('click', confirmPhoto);
+  $('#btn-retry-photo').addEventListener('click', retryPhoto);
 
   // ── Face Detection Loop (capture mode) ────
   let detectionLoopId = null;
