@@ -1,3 +1,3 @@
 flet
-opencv-python
+opencv-contrib-python
 numpy

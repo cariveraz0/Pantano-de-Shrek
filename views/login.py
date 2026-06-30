@@ -275,6 +275,12 @@ def build_login_view(page, nav):
             status_text.color = COLORS["text_muted"]
             page.update()
 
+            if not LBPH_AVAILABLE:
+                status_text.value = "Error: Falta instalar opencv-contrib-python."
+                status_text.color = COLORS["error"]
+                page.update()
+                return
+
             rec, lmap = build_face_recognizer()
             if not rec:
                 status_text.value = "Error al entrenar el modelo. No hay rostros válidos."
