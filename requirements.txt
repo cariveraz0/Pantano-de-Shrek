@@ -1,3 +1,4 @@
 flet
 opencv-contrib-python
 numpy
+flet-camera
