@@ -602,18 +602,26 @@
       try {
         const detections = await faceapi.detectAllFaces(
           cameraVideo,
-          new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 })
+          new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.6 })
         );
         if (detections.length > 0) {
           setScanCornerState('detecting');
-          scanStatus.textContent = '¡Rostro detectado! Presiona "Tomar Foto"';
+          scanStatus.textContent = '¡Rostro detectado! Capturando...';
           scanStatus.style.color = 'var(--success)';
+          
+          // Auto-capture
+          takePhoto();
+          return; // Stop loop
         } else {
           setScanCornerState('default');
           scanStatus.textContent = 'Buscando rostro...';
           scanStatus.style.color = 'var(--text-muted)';
         }
       } catch { /* ignore */ }
+      
+      // Prevent browser freeze by allowing main thread to breathe
+      await sleep(300);
+      
       if (cameraMode === 'capture') {
         detectionLoopId = requestAnimationFrame(detect);
       }
@@ -779,6 +787,9 @@
           scanStatus.style.color = 'var(--text-muted)';
         }
       } catch { /* ignore */ }
+      
+      // Prevent browser freeze by allowing main thread to breathe
+      await sleep(300);
 
       if (cameraMode === 'recognize') {
         requestAnimationFrame(recognizeLoop);
