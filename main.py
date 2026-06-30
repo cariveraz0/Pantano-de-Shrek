@@ -56,4 +56,4 @@ def main(page: ft.Page):
     nav["login"]()
 
 
-ft.app(target=main, view=ft.AppView.WEB_BROWSER, port=8551)
+ft.run(main=main, view=ft.AppView.WEB_BROWSER, port=8551, host="0.0.0.0")
